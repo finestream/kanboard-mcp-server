@@ -1,0 +1,34 @@
+# The server next to Kanboard: one container on Kanboard's network, the
+# credentials from a file, read-only root filesystem, exposed through the
+# reverse proxy or a tunnel on its own host name. Copy, adjust the host names
+# and paths, and keep the secrets folder root-only.
+
+services:
+  kanboard-mcp:
+    image: ghcr.io/finestream/kanboard-mcp-server:latest   # in production, pin a release and its digest: :0.1.0@sha256:…
+    read_only: true
+    user: "1000:1000"
+    environment:
+      KANBOARD_URL: http://kanboard          # Kanboard's base URL on the shared network; /jsonrpc.php is appended
+      PORT: "4000"
+      MCP_CREDENTIALS_FILE: /run/secrets/credentials
+      # MCP_RATE_LIMIT: "120"                # tool calls per user and minute
+      # KANBOARD_TIMEOUT: 30s                # the most a call to Kanboard may take
+      # OAuth beside the static bearers (docs/oauth.md): both, or neither
+      # MCP_OAUTH_ISSUER: https://login.example.org/realms/main
+      # MCP_OAUTH_RESOURCE: https://kanboard-mcp.example.org/mcp   # the URL the clients enter, path included
+      # Cloudflare Access in front of the server (docs/cloudflare-access.md): both, or neither
+      # MCP_CF_ACCESS_TEAM_DOMAIN: <team>.cloudflareaccess.com
+      # MCP_CF_ACCESS_AUD: <the application's AUD tag>
+    secrets:
+      - credentials
+    networks:
+      - kanboard
+
+secrets:
+  credentials:
+    file: ./secrets/kanboard-mcp-credentials
+
+networks:
+  kanboard:
+    external: true

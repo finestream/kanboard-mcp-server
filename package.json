@@ -1,0 +1,31 @@
+{
+  "name": "kanboard-mcp-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "An MCP server for a Kanboard instance: one Kanboard user per agent, authenticated by a static bearer, an OAuth access token or a Cloudflare Access assertion; tools for tasks, comments, tags, links, subtasks and search.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "lint": "eslint . && tsc -p tsconfig.json",
+    "test": "npm run test:unit && npm run test:integration",
+    "test:unit": "node --test 'src/**/*.test.ts'",
+    "test:integration": "node --test --test-concurrency=1 'test/server/*.test.ts'",
+    "bootstrap": "node test/bootstrap.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "jose": "^6.2.15",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.0",
+    "@types/node": "^24.0.0",
+    "eslint": "^10.0.0",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.72.0"
+  }
+}
