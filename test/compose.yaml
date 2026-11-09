@@ -1,0 +1,26 @@
+# Test instance: a plain Kanboard with its SQLite database, the image's default
+# administrator (admin / admin).
+#
+#   docker compose -f test/compose.yaml up -d --wait   # Kanboard on http://127.0.0.1:8580
+#   node test/bootstrap.ts                              # users, projects, memberships (idempotent)
+#   npm run test:integration
+#   docker compose -f test/compose.yaml down -v         # remove everything
+#
+# Another release: KB_IMAGE=kanboard/kanboard:v1.2.50 docker compose -f test/compose.yaml up -d --wait
+
+name: kbmcp-test
+
+services:
+  kanboard:
+    image: ${KB_IMAGE:-kanboard/kanboard:v1.2.57}
+    ports:
+      - "127.0.0.1:${KB_PORT:-8580}:80"
+    volumes:
+      - kbdata:/var/www/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/login"]
+      interval: 2s
+      retries: 30
+
+volumes:
+  kbdata:

@@ -1,0 +1,8 @@
+node_modules
+test
+docs
+scripts
+.github
+.git
+*.md
+!config/*
