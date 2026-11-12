@@ -1,6 +1,7 @@
 // Creates the fixtures of test/lib/env.ts on the test instance, idempotently,
 // through the user API as the administrator (the application token of a fresh
-// Kanboard is random; the administrator's password is known).
+// Kanboard is random; the administrator's password is known). Started by
+// `node test/instance.ts up`, which also tells it the instance (KB_URL).
 
 import { ADMIN, kb, PASSWORDS, PROJECTS } from "./lib/env.ts";
 
