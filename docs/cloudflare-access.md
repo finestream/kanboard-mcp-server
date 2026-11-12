@@ -1,6 +1,6 @@
 # Cloudflare Access
 
-Status: **built and tested against a test team domain** (2026-11-09); the verifier is the one of [finestream/silverbullet-mcp](https://github.com/finestream/silverbullet-mcp/blob/main/docs/cloudflare-access.md), which has served hosted MCP clients through a real Access application since 2026-11-07.
+Status: **built and tested against a test team domain** (2026-11-09); the verifier is the one of [finestream/silverbullet-mcp-server](https://github.com/finestream/silverbullet-mcp-server/blob/main/docs/cloudflare-access.md), which has served hosted MCP clients through a real Access application since 2026-11-07.
 
 A third way in, beside static bearers and OAuth tokens ([oauth.md](oauth.md)), for a server published through [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/): Access logs the user in and lets a request through only then, and the server takes the agent from the assertion Access adds to the request. With Access's [Managed OAuth](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/), Access is also the OAuth authorization server a hosted MCP client needs, so neither Kanboard nor an identity provider has to be reachable from the internet.
 

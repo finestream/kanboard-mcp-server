@@ -14,7 +14,7 @@ It replaces a Kanboard plugin that serves MCP from inside Kanboard with a token 
 
 ## Status
 
-**0.1.0:** the server, the 24 tools, the three logins, unit and integration tests against a Kanboard test instance (`kanboard/kanboard:v1.2.57`), the image and the CI. Not yet run against a production Kanboard or a real identity provider or Access application; the two verifiers are the ones of [finestream/silverbullet-mcp](https://github.com/finestream/silverbullet-mcp), which has.
+**0.1.0:** the server, the 24 tools, the three logins, unit and integration tests against a Kanboard test instance (`kanboard/kanboard:v1.2.57`), the image and the CI. Not yet run against a production Kanboard or a real identity provider or Access application; the two verifiers are the ones of [finestream/silverbullet-mcp-server](https://github.com/finestream/silverbullet-mcp-server), which has.
 
 ## What is here
 
@@ -142,6 +142,6 @@ Code is taken only from MIT, Apache-2.0 or BSD-licensed projects and is credited
 
 ## Attributions
 
-* [finestream/silverbullet-mcp](https://github.com/finestream/silverbullet-mcp) (MIT): the HTTP server, the credentials file, the OAuth and Cloudflare Access verifiers, the configuration watcher, the log and the test harness were taken from it, with the SilverBullet parts removed.
+* [finestream/silverbullet-mcp-server](https://github.com/finestream/silverbullet-mcp-server) (MIT): the HTTP server, the credentials file, the OAuth and Cloudflare Access verifiers, the configuration watcher, the log and the test harness were taken from it, with the SilverBullet parts removed.
 * [rtasarz/kanboard-mcp](https://github.com/rtasarz/kanboard-mcp) (MIT; from [ChristianJStarr/kanboard-mcp](https://github.com/ChristianJStarr/kanboard-mcp)): the Kanboard plugin whose tool names this server keeps where a tool does the same. No code was taken from it.
 * [Kanboard's API documentation](https://docs.kanboard.org/v1/api/) for the procedures and their parameters.
