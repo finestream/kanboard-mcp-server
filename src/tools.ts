@@ -98,8 +98,7 @@ const RECURRENCE = {
   recurrence_basedate: z.number().int().min(0).max(1).describe("Base date of the next due date: 0 = this task's due date, 1 = the date the trigger fires"),
 };
 const RECURRENCE_SCHEMA = z.object(RECURRENCE).partial();
-const RECURRENCE_KEYS = RECURRENCE_WRITABLE;
-const OTHER_KEYS = RECURRENCE_KEYS.filter((k) => k !== "recurrence_status");
+const OTHER_KEYS = RECURRENCE_WRITABLE.filter((k) => k !== "recurrence_status");
 type Recurrence = z.infer<typeof RECURRENCE_SCHEMA>;
 
 /** The largest search result returned; Kanboard has no paging on `searchTasks`. */
@@ -179,18 +178,51 @@ export function registerTools(server: McpServer, ctx: Context) {
   };
 
   /**
-   * The rules a repeating task must meet, for create_task (nothing stored yet) and update_task (the
-   * stored task as `now`). Without them Kanboard accepts the settings and then repeats wrongly or not at all.
+   * The rules a repeating task must meet, for create_task (nothing stored yet) and for update_task and
+   * set_task_due_date (the stored task as `now`). Without them Kanboard accepts the settings and then
+   * repeats wrongly or not at all. `column_id` is where the task is (undefined: the first column, on create).
    */
-  const checkRecurrence = (a: Recurrence, now: { subject: string; status: number; factor: number; child: number; due: boolean }) => {
+  const checkRecurrence = async (a: Recurrence, now: { subject: string; project_id: number; column_id?: number; status: number; trigger: number; factor: number; child: number; due: boolean }) => {
     const status = a.recurrence_status ?? now.status;
     const others = OTHER_KEYS.filter((k) => a[k] !== undefined);
-    if (a.recurrence_status === 1 && now.child > 0) throw new Refusal("input", `${now.subject} already created its next task (recurrence_child ${now.child}); recurrence_status 1 would make Kanboard create a second one. Change the recurrence on task ${now.child} instead.`);
-    if (others.length && status !== 1) throw new Refusal("input", `${others.join(", ")} given without recurrence_status 1 (it is ${status}): ${now.subject.toLowerCase()} would not repeat. Add recurrence_status: 1${now.child > 0 ? "" : ", or leave the recurrence fields out"}.`);
+    // A child that was deleted since no longer blocks: Kanboard would create the next task again.
+    // Kanboard answers 403 for a task that does not exist, to a user who is not an administrator.
+    const exists = async (taskId: number) => {
+      try {
+        return !!(await kb.call<Raw | null>(auth, "getTask", { task_id: taskId }));
+      } catch (e) {
+        if (e instanceof KanboardError && e.forbidden) return false;
+        if (e instanceof KanboardError) throw kanboardFailure(e, `reading task ${taskId}`);
+        throw e;
+      }
+    };
+    const child = now.child > 0 && (await exists(now.child)) ? now.child : 0;
+    if (a.recurrence_status === 1 && child > 0) throw new Refusal("input", `${now.subject} already created its next task (recurrence_child ${child}); recurrence_status 1 would make Kanboard create a second one. Change the recurrence on task ${child} instead.`);
+    if (others.length && status !== 1) throw new Refusal("input", `${others.join(", ")} given without recurrence_status 1 (it is ${status}): ${now.subject.toLowerCase()} would not repeat. ${child > 0 ? `It already created its next task (recurrence_child ${child}): change the recurrence on that task, or leave the recurrence fields out.` : "Add recurrence_status: 1, or leave the recurrence fields out."}`);
     if (status !== 1) return;
+    if (!now.due) throw new Refusal("input", `A repeating task (recurrence_status 1) needs a due date: ${now.subject.toLowerCase()} has none, and Kanboard computes the next due date from it. Give date_due, or set recurrence_status 0 first.`);
     if ((a.recurrence_factor ?? now.factor) < 1) throw new Refusal("input", `recurrence_status 1 needs recurrence_factor of 1 or more (7 with recurrence_timeframe 0 = weekly): ${now.subject.toLowerCase()} has none, so every next task would have the same due date.`);
-    if (!now.due) throw new Refusal("input", `recurrence_status 1 needs a due date (date_due): ${now.subject.toLowerCase()} has none, and Kanboard computes the next due date from it.`);
+    const trigger = a.recurrence_trigger ?? now.trigger;
+    if (trigger !== 0 && trigger !== 1) return;
+    const columns = await call<Raw[]>(`reading the columns of project ${now.project_id}`, "getColumns", { project_id: now.project_id });
+    const ordered = columns.map((c) => ({ id: Number(c.id), position: Number(c.position) })).sort((x, y) => x.position - y.position);
+    if (ordered.length < 2) throw new Refusal("input", `recurrence_trigger ${trigger} needs a move between columns, and project ${now.project_id} has one column: it can never fire. Use recurrence_trigger 2 (closed).`);
+    const column = now.column_id ?? ordered[0]!.id;
+    if (trigger === 0 && column !== ordered[0]!.id) throw new Refusal("input", `recurrence_trigger 0 fires when the task moves out of the first column, and column ${column} is not the first. Use the first column (on create, leave column_id out), or another trigger.`);
+    if (trigger === 1 && column === ordered.at(-1)!.id) throw new Refusal("input", `recurrence_trigger 1 fires when the task moves to the last column, and column ${column} is the last: it is already there. Use another column or trigger.`);
   };
+
+  /** The recurrence facts of a stored task, for checkRecurrence. */
+  const stored = (t: Raw, a: { date_due?: string }) => ({
+    subject: `Task ${Number(t.id)}`,
+    project_id: Number(t.project_id),
+    column_id: Number(t.column_id),
+    status: Number(t.recurrence_status),
+    trigger: Number(t.recurrence_trigger),
+    factor: Number(t.recurrence_factor),
+    child: Number(t.recurrence_child) || 0,
+    due: a.date_due === undefined ? Number(t.date_due) > 0 : a.date_due !== "",
+  });
 
   /** The link labels: Kanboard's, or the built-in defaults when this user may not list them. */
   const linkLabels = async (): Promise<{ labels: typeof DEFAULT_LINK_LABELS; source: "kanboard" | "built-in defaults" }> => {
@@ -420,16 +452,9 @@ export function registerTools(server: McpServer, ctx: Context) {
     },
     tool<{ project_id: number; title: string; priority: number; description?: string; column_id?: number; swimlane_id?: number; category_id?: number; color_id?: string; owner_id?: number; date_due?: string; tags?: string[]; reference?: string } & Recurrence>("create_task", async (a) => {
       const due = a.date_due === undefined ? undefined : dateOrRefuse("date_due", a.date_due);
-      checkRecurrence(a, { subject: "The new task", status: 0, factor: 0, child: 0, due: !!due });
-      if (a.recurrence_status === 1 && a.column_id !== undefined) {
-        const columns = await call<Raw[]>(`reading the columns of project ${a.project_id}`, "getColumns", { project_id: a.project_id });
-        const ordered = columns.map((c) => ({ id: Number(c.id), position: Number(c.position) })).sort((x, y) => x.position - y.position);
-        const trigger = a.recurrence_trigger ?? 0;
-        if (trigger === 0 && ordered[0] && a.column_id !== ordered[0].id) throw new Refusal("input", `recurrence_trigger 0 fires when the task moves out of the first column, and column ${a.column_id} is not the first. Create it in the first column (or leave column_id out), or use another trigger.`);
-        if (trigger === 1 && ordered.length > 1 && a.column_id === ordered.at(-1)!.id) throw new Refusal("input", `recurrence_trigger 1 fires when the task moves to the last column, and column ${a.column_id} is the last: it is already there. Use another column or trigger.`);
-      }
+      await checkRecurrence(a, { subject: "The new task", project_id: a.project_id, column_id: a.column_id, status: 0, trigger: 0, factor: 0, child: 0, due: !!due });
       const params: Raw = { project_id: a.project_id, title: a.title, priority: a.priority };
-      for (const k of ["description", "column_id", "swimlane_id", "category_id", "color_id", "owner_id", "tags", "reference", ...RECURRENCE_KEYS] as const) if (a[k] !== undefined) params[k] = a[k];
+      for (const k of ["description", "column_id", "swimlane_id", "category_id", "color_id", "owner_id", "tags", "reference", ...RECURRENCE_WRITABLE] as const) if (a[k] !== undefined) params[k] = a[k];
       if (due !== undefined) params.date_due = due;
       const task_id = await created(`creating the task "${a.title}"`, "createTask", params, "Check the project id, the column and swimlane ids (get_columns, get_swimlanes), the category and the owner (get_users).");
       const t = await task(task_id);
@@ -461,11 +486,11 @@ export function registerTools(server: McpServer, ctx: Context) {
       const changed: string[] = [];
       const dates: Raw = {};
       for (const k of ["date_due", "date_started"] as const) if (a[k] !== undefined) dates[k] = dateOrRefuse(k, a[k]);
-      if (RECURRENCE_KEYS.some((k) => a[k] !== undefined) || a.date_due === "") {
+      if (RECURRENCE_WRITABLE.some((k) => a[k] !== undefined) || a.date_due === "") {
         const t = await task(a.task_id);
-        checkRecurrence(a, { subject: `Task ${a.task_id}`, status: Number(t.recurrence_status), factor: Number(t.recurrence_factor), child: Number(t.recurrence_child) || 0, due: a.date_due === undefined ? Number(t.date_due) > 0 : a.date_due !== "" });
+        await checkRecurrence(a, stored(t, a));
       }
-      for (const k of ["title", "description", "category_id", "color_id", "owner_id", "priority", "reference", ...RECURRENCE_KEYS] as const) {
+      for (const k of ["title", "description", "category_id", "color_id", "owner_id", "priority", "reference", ...RECURRENCE_WRITABLE] as const) {
         if (a[k] === undefined) continue;
         params[k] = a[k];
         changed.push(k);
@@ -512,7 +537,7 @@ export function registerTools(server: McpServer, ctx: Context) {
       const d = dateOrRefuse("due_date", due_date);
       if (d === "") {
         const t = await task(task_id);
-        if (Number(t.recurrence_status) === 1) throw new Refusal("input", `Task ${task_id} repeats (recurrence_status 1) and Kanboard computes the next due date from this one: clearing it would leave every next task without a due date. Set recurrence_status 0 first.`);
+        await checkRecurrence({}, stored(t, { date_due: "" }));
       }
       await apply(`setting the due date of task ${task_id}`, "updateTask", { id: task_id, date_due: d }, "Check that the task exists in a project the user is a member of.");
       const t = await task(task_id);
