@@ -246,7 +246,7 @@ test("recurrence: set on create and update, returned on read, and Kanboard creat
   }
 });
 
-test("recurrence: the trigger is checked against the task's column on update, a single column, and the child hint", async () => {
+test("recurrence: the trigger is checked against the task's column on update, a single column, and the next-task hint", async () => {
   const columns = ok(await alice.call("get_columns", { project_id: alpha })).columns;
   const second = columns[1];
   const last = columns.at(-1);
@@ -268,12 +268,15 @@ test("recurrence: the trigger is checked against the task's column on update, a 
   ok(await alice.call("update_task", { task_id: inLast, recurrence_status: 1, recurrence_trigger: 2, recurrence_factor: 7 }));
   await refused("update_task", { task_id: inLast, recurrence_trigger: 1 }, /is the last/);
   const inSecond = await make({ column_id: second.id });
-  await refused("update_task", { task_id: inSecond, recurrence_status: 1, recurrence_trigger: 0, recurrence_factor: 7 }, /not the first/);
+  const hint0 = await refused("update_task", { task_id: inSecond, recurrence_status: 1, recurrence_trigger: 0, recurrence_factor: 7 }, /not the first/);
+  assert.match(hint0, /move_task/);
+  assert.doesNotMatch(hint0, /leave column_id out/, "an update cannot leave column_id out");
+  assert.match(await refused("create_task", { project_id: alpha, title: "x", priority: 1, date_due: "2026-11-20", column_id: second.id, recurrence_status: 1, recurrence_trigger: 0, recurrence_factor: 7 }, /not the first/), /leave column_id out/);
   ok(await alice.call("update_task", { task_id: inSecond, recurrence_status: 1, recurrence_trigger: 1, recurrence_factor: 7 }));
   const inFirst = await make({});
   ok(await alice.call("update_task", { task_id: inFirst, recurrence_status: 1, recurrence_trigger: 0, recurrence_factor: 7 }));
 
-  // 1: a project with one column cannot fire trigger 0 or 1, but can with trigger 2.
+  // 2: a project with one column cannot fire trigger 0 or 1, but can with trigger 2.
   const single = Number(await kb.call(ADMIN, "createProject", { name: unique("Single") }));
   try {
     await kb.call(ADMIN, "addProjectUser", { project_id: single, user_id: aliceId, role: "project-member" });
@@ -289,7 +292,7 @@ test("recurrence: the trigger is checked against the task's column on update, a 
     await kb.call(ADMIN, "removeProject", { project_id: single }).catch(() => {});
   }
 
-  // 2 and 3: a task whose next task exists; the hint does not advise status 1, and a deleted child stops blocking.
+  // 3: a task whose next task exists; the hint does not advise status 1, and a deleted child stops blocking.
   const parent = await make({ recurrence_status: 1, recurrence_trigger: 1, recurrence_factor: 7 });
   ok(await alice.call("move_task", { task_id: parent, column_id: last.id }));
   const child = ok(await alice.call("get_task_details", { task_id: parent })).recurrence_child;
@@ -304,7 +307,7 @@ test("recurrence: the trigger is checked against the task's column on update, a 
   assert.match(freed.text, /Add recurrence_status: 1/);
   ok(await alice.call("update_task", { task_id: parent, recurrence_status: 1, recurrence_trigger: 2, recurrence_factor: 3 }));
 
-  // 4: clearing the due date of a task with factor 0 gets the due-date message.
+  // Also: clearing the due date of a task with factor 0 gets the due-date message.
   const bare = await make({});
   await kb.call(ADMIN, "updateTask", { id: bare, recurrence_status: 1, recurrence_trigger: 2 });
   await refused("update_task", { task_id: bare, date_due: "" }, /needs a due date/);

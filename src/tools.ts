@@ -138,6 +138,17 @@ export function registerTools(server: McpServer, ctx: Context) {
     return n;
   };
 
+  /** One call that answers `fallback` where Kanboard says 403 (no permission, or nothing there); other errors are refusals. */
+  const orForbidden = async <T, F>(what: string, method: string, params: Raw | undefined, fallback: F): Promise<T | F> => {
+    try {
+      return await kb.call<T>(auth, method, params);
+    } catch (e) {
+      if (e instanceof KanboardError && e.forbidden) return fallback;
+      if (e instanceof KanboardError) throw kanboardFailure(e, what);
+      throw e;
+    }
+  };
+
   const me = async (): Promise<Me> => {
     const cached = ctx.me.get(user.user);
     if (cached) return cached;
@@ -182,21 +193,15 @@ export function registerTools(server: McpServer, ctx: Context) {
    * set_task_due_date (the stored task as `now`). Without them Kanboard accepts the settings and then
    * repeats wrongly or not at all. `column_id` is where the task is (undefined: the first column, on create).
    */
-  const checkRecurrence = async (a: Recurrence, now: { subject: string; project_id: number; column_id?: number; status: number; trigger: number; factor: number; child: number; due: boolean }) => {
+  const checkRecurrence = async (a: Recurrence, now: { subject: string; project_id: number; column_id?: number; status: number; trigger: number; factor: number; child: number; due: boolean; stored?: true }) => {
     const status = a.recurrence_status ?? now.status;
     const others = OTHER_KEYS.filter((k) => a[k] !== undefined);
-    // A child that was deleted since no longer blocks: Kanboard would create the next task again.
-    // Kanboard answers 403 for a task that does not exist, to a user who is not an administrator.
-    const exists = async (taskId: number) => {
-      try {
-        return !!(await kb.call<Raw | null>(auth, "getTask", { task_id: taskId }));
-      } catch (e) {
-        if (e instanceof KanboardError && e.forbidden) return false;
-        if (e instanceof KanboardError) throw kanboardFailure(e, `reading task ${taskId}`);
-        throw e;
-      }
-    };
-    const child = now.child > 0 && (await exists(now.child)) ? now.child : 0;
+    // A next task that was deleted since no longer blocks, or Kanboard would never create another. Kanboard
+    // answers 403 for a task that does not exist, and also for one in a project this user cannot see, and a
+    // non-administrator cannot tell the two apart: such a child counts as deleted, which lifts the guard
+    // against a second next task. Looked up only when a refusal can depend on it.
+    const needsChild = a.recurrence_status === 1 || others.length > 0;
+    const child = needsChild && now.child > 0 && (await orForbidden(`reading task ${now.child}`, "getTask", { task_id: now.child }, null)) ? now.child : 0;
     if (a.recurrence_status === 1 && child > 0) throw new Refusal("input", `${now.subject} already created its next task (recurrence_child ${child}); recurrence_status 1 would make Kanboard create a second one. Change the recurrence on task ${child} instead.`);
     if (others.length && status !== 1) throw new Refusal("input", `${others.join(", ")} given without recurrence_status 1 (it is ${status}): ${now.subject.toLowerCase()} would not repeat. ${child > 0 ? `It already created its next task (recurrence_child ${child}): change the recurrence on that task, or leave the recurrence fields out.` : "Add recurrence_status: 1, or leave the recurrence fields out."}`);
     if (status !== 1) return;
@@ -206,9 +211,9 @@ export function registerTools(server: McpServer, ctx: Context) {
     if (trigger !== 0 && trigger !== 1) return;
     const columns = await call<Raw[]>(`reading the columns of project ${now.project_id}`, "getColumns", { project_id: now.project_id });
     const ordered = columns.map((c) => ({ id: Number(c.id), position: Number(c.position) })).sort((x, y) => x.position - y.position);
-    if (ordered.length < 2) throw new Refusal("input", `recurrence_trigger ${trigger} needs a move between columns, and project ${now.project_id} has one column: it can never fire. Use recurrence_trigger 2 (closed).`);
+    if (ordered.length < 2) throw new Refusal("input", `recurrence_trigger ${trigger} needs a move between columns, and project ${now.project_id} has ${ordered.length ? "one column" : "no columns"}: it can never fire. Use recurrence_trigger 2 (closed).`);
     const column = now.column_id ?? ordered[0]!.id;
-    if (trigger === 0 && column !== ordered[0]!.id) throw new Refusal("input", `recurrence_trigger 0 fires when the task moves out of the first column, and column ${column} is not the first. Use the first column (on create, leave column_id out), or another trigger.`);
+    if (trigger === 0 && column !== ordered[0]!.id) throw new Refusal("input", `recurrence_trigger 0 fires when the task moves out of the first column, and column ${column} is not the first. ${now.stored ? `Move the task to the first column with move_task, or use another trigger.` : "Use the first column (leave column_id out), or another trigger."}`);
     if (trigger === 1 && column === ordered.at(-1)!.id) throw new Refusal("input", `recurrence_trigger 1 fires when the task moves to the last column, and column ${column} is the last: it is already there. Use another column or trigger.`);
   };
 
@@ -222,18 +227,14 @@ export function registerTools(server: McpServer, ctx: Context) {
     factor: Number(t.recurrence_factor),
     child: Number(t.recurrence_child) || 0,
     due: a.date_due === undefined ? Number(t.date_due) > 0 : a.date_due !== "",
+    stored: true as const,
   });
 
   /** The link labels: Kanboard's, or the built-in defaults when this user may not list them. */
   const linkLabels = async (): Promise<{ labels: typeof DEFAULT_LINK_LABELS; source: "kanboard" | "built-in defaults" }> => {
-    try {
-      const raw = await kb.call<Raw[]>(auth, "getAllLinks");
-      return { labels: raw.map((l) => ({ id: Number(l.id), label: String(l.label), opposite_id: Number(l.opposite_id ?? 0) })), source: "kanboard" };
-    } catch (e) {
-      if (e instanceof KanboardError && e.forbidden) return { labels: DEFAULT_LINK_LABELS, source: "built-in defaults" };
-      if (e instanceof KanboardError) throw kanboardFailure(e, "reading the link labels");
-      throw e;
-    }
+    const raw = await orForbidden<Raw[], null>("reading the link labels", "getAllLinks", undefined, null);
+    if (!raw) return { labels: DEFAULT_LINK_LABELS, source: "built-in defaults" };
+    return { labels: raw.map((l) => ({ id: Number(l.id), label: String(l.label), opposite_id: Number(l.opposite_id ?? 0) })), source: "kanboard" };
   };
 
   /** Wraps a handler: refusals become tool errors, anything else a generic one; every call is logged. */
