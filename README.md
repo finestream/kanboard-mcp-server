@@ -128,10 +128,8 @@ What a tool answers when Kanboard refuses, and why there is no delete: [docs/sec
 ```sh
 npm run lint                                          # eslint and tsc
 npm run test:unit                                     # the credentials file, the configuration, the formatting, the client, the verifiers
-docker compose -f test/compose.yaml up -d --wait      # Kanboard on http://127.0.0.1:8580
-node test/bootstrap.ts                                # users, projects, memberships (idempotent)
-npm run test:integration                              # the server against that instance: every tool, the two logins
-docker compose -f test/compose.yaml down -v
+npm run test:integration                              # starts and bootstraps this working copy's Kanboard instance, then runs the server against it: every tool, the two logins
+node test/instance.ts down                            # removes the instance (down -v)
 ```
 
 Details: [test/README.md](test/README.md).

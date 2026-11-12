@@ -22,14 +22,10 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run test:unit
-      - name: Start the Kanboard test instance
-        run: docker compose -f test/compose.yaml up -d --wait
-      - name: Bootstrap the test instance
-        run: node test/bootstrap.ts
       - run: npm run test:integration
       - name: Stop the test instance
         if: always()
-        run: docker compose -f test/compose.yaml down -v
+        run: node test/instance.ts down
 
   image:
     name: Build and push the image

@@ -16,7 +16,7 @@ Three layers:
 | another linked worktree | `kbmcp-test-<hash of the path>` | 20000-39999 |
 | a plain clone, and CI | `kbmcp-test` | 8580 |
 
-`COMPOSE_PROJECT_NAME` and `KB_PORT` in the environment win. `up` starts the instance, writes `test/.state/env` (git-ignored, this working copy only; `lib/env.ts` reads the URL from it), and runs the bootstrap. `npm run test:integration` runs `up` first.
+A task id above 9999 gets the hashed project and port. `COMPOSE_PROJECT_NAME` and `KB_PORT` (an integer port) in the environment win. Two checkouts of the same task branch on one machine derive the same instance and share it. `up` starts the instance, writes `test/.state/env` (git-ignored, this working copy only; `lib/env.ts` reads the URL from it), and runs the bootstrap. `npm run test:integration` runs `up` first. `down` and `env` use the instance `up` recorded in `test/.state/env` (so a branch switch does not lose it) and derive one only if there is none; never copy `test/.state` to another working copy. With `KB_URL` set, `up` starts nothing and only bootstraps the instance it names, so `KB_URL=… npm run test:integration` runs against another Kanboard.
 
 [`compose.yaml`](compose.yaml) runs a plain Kanboard (`kanboard/kanboard:v1.2.57` unless `KB_IMAGE` says otherwise) with its SQLite database on `http://127.0.0.1:$KB_PORT`. The image's administrator is `admin` / `admin`.
 
