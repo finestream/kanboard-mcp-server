@@ -13,8 +13,8 @@
     "lint": "eslint . && tsc -p tsconfig.json",
     "test": "npm run test:unit && npm run test:integration",
     "test:unit": "node --test 'src/**/*.test.ts'",
-    "test:integration": "node --test --test-concurrency=1 'test/server/*.test.ts'",
-    "bootstrap": "node test/bootstrap.ts"
+    "test:integration": "node test/instance.ts up && node --test --test-concurrency=1 'test/server/*.test.ts'",
+    "test:instance": "node test/instance.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",

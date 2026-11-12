@@ -9,9 +9,19 @@
 // A user's password is what the credentials file holds as that user's token:
 // Kanboard takes a password or a personal API token as the Basic password alike.
 
+import { readFileSync } from "node:fs";
 import { Kanboard, type KanboardAuth } from "../../src/kanboard.ts";
 
-export const KB_URL = process.env.KB_URL ?? "http://127.0.0.1:8580/jsonrpc.php";
+/** The URL `node test/instance.ts up` wrote for this working copy (test/.state/env), if it ran. */
+function stateUrl(): string | undefined {
+  try {
+    return readFileSync(new URL("../.state/env", import.meta.url), "utf8").match(/^KB_URL=(.+)$/m)?.[1];
+  } catch {
+    return undefined;
+  }
+}
+
+export const KB_URL = process.env.KB_URL ?? stateUrl() ?? "http://127.0.0.1:8580/jsonrpc.php";
 export const ADMIN: KanboardAuth = { username: process.env.KB_ADMIN_USER ?? "admin", token: process.env.KB_ADMIN_PASSWORD ?? "admin" };
 export const PASSWORDS = { alice: "alice-test-password", bob: "bob-test-password", carol: "carol-test-password" } as const;
 export type Fixture = keyof typeof PASSWORDS;

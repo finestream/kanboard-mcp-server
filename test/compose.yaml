@@ -1,12 +1,13 @@
 # Test instance: a plain Kanboard with its SQLite database, the image's default
 # administrator (admin / admin).
 #
-#   docker compose -f test/compose.yaml up -d --wait   # Kanboard on http://127.0.0.1:8580
-#   node test/bootstrap.ts                              # users, projects, memberships (idempotent)
+#   node test/instance.ts up     # starts this working copy's instance and bootstraps it
 #   npm run test:integration
-#   docker compose -f test/compose.yaml down -v         # remove everything
+#   node test/instance.ts down   # remove everything (down -v)
 #
-# Another release: KB_IMAGE=kanboard/kanboard:v1.2.50 docker compose -f test/compose.yaml up -d --wait
+# test/instance.ts sets the project name (-p) and KB_PORT per working copy; started by hand
+# the defaults are project kbmcp-test and port 8580.
+# Another release: KB_IMAGE=kanboard/kanboard:v1.2.50 node test/instance.ts up
 
 name: kbmcp-test
 
