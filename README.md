@@ -97,15 +97,29 @@ Every tool acts as the agent's Kanboard user. Ids come from the reading tools; d
 | `get_columns`, `get_swimlanes`, `get_categories`, `get_project_tags`, `get_users` | A project's columns, active swimlanes, categories, tags and members, with ids |
 | `get_colors`, `get_link_labels` | Kanboard's task colours; the labels of internal links (a plain user gets the built-in defaults, and `source` says so) |
 | `search_tasks` | Kanboard's [search syntax](https://docs.kanboard.org/v1/user/search/) on one project; up to 200 tasks, with tags |
-| `get_task_details` | A task with tags, links, subtasks, attachments (names) and, on request, comments |
+| `get_task_details` | A task with tags, links, subtasks, attachments (names), its recurrence and, on request, comments |
 | `get_task_comments` | The comments of a task, oldest first |
-| `create_task` | Title, required priority, description, column, swimlane, category, colour, assignee, due date, tags, reference |
-| `update_task` | Title, description, category, colour, assignee, priority, reference, due and start date |
+| `create_task` | Title, required priority, description, column, swimlane, category, colour, assignee, due date, tags, reference, recurrence |
+| `update_task` | Title, description, category, colour, assignee, priority, reference, due and start date, recurrence |
 | `move_task` | To a column (and swimlane) of its project, at a position |
 | `assign_task`, `set_task_due_date`, `set_task_tags` | Assignee (0 for nobody); due date with or without time, `""` clears; tags added or, with `replace`, set |
 | `add_task_comment`, `update_task_comment` | A comment as the user; the text of an own comment |
 | `create_task_link`, `remove_task_link` | An internal link by label or id (Kanboard adds the opposite link); its removal |
 | `create_subtask`, `update_subtask` | A subtask; its title, status (0 to do, 1 in progress, 2 done) or assignee |
+
+### Recurring tasks
+
+Kanboard keeps a task's recurrence on the task and creates the next task itself when the trigger fires. `create_task` and `update_task` take the fields with Kanboard's names and numbers, and the reading tools return them:
+
+| Field | Values |
+|---|---|
+| `recurrence_status` | 0 off, 1 on; Kanboard sets 2 once the next task exists (read only) |
+| `recurrence_trigger` | 0 moved out of the first column, 1 moved to the last column, 2 closed |
+| `recurrence_factor`, `recurrence_timeframe` | The interval (1 or more) and its unit: 0 days, 1 months, 2 years |
+| `recurrence_basedate` | What the interval is added to for the next due date: 0 the task's due date, 1 the date the trigger fires (the task still needs a due date) |
+| `recurrence_parent`, `recurrence_child` | Read only: the task this one was created from, and the task created from this one |
+
+A weekly task is `recurrence_status: 1, recurrence_trigger: 1, recurrence_factor: 7, recurrence_timeframe: 0, recurrence_basedate: 0` with a due date: `move_task` to the last column creates the next task in the first column, due a week later, with the same recurrence. `recurrence_status: 1` needs a due date and a `recurrence_factor` of 1 or more (given, or already on the task), and the other recurrence fields need status 1; all of these are refused otherwise. A task that already created its next task (it has a `recurrence_child`) cannot be set to status 1 again: change the recurrence on the child. `create_task` also refuses a trigger that cannot fire from the column given (trigger 0 outside the first column, trigger 1 in the last). `update_task` and `set_task_due_date` refuse to clear the due date of a repeating task. The tools do not close a task, so trigger 2 fires when a person or an automatic action closes it.
 
 What a tool answers when Kanboard refuses, and why there is no delete: [docs/security.md](docs/security.md), sections 4 and 6.
 

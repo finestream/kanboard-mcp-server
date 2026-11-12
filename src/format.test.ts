@@ -36,6 +36,9 @@ test("format: a task keeps Kanboard's field names, with numbers, booleans and IS
   assert.equal(t.nb_comments, 3);
   assert.equal(t.column_name, "Ready");
   assert.equal("nb_files" in t, false, "fields searchTasks did not send are absent");
+  assert.equal("recurrence_status" in t, false);
+  const r = taskView({ id: 8, recurrence_status: "2", recurrence_trigger: "1", recurrence_factor: "7", recurrence_timeframe: "0", recurrence_basedate: "0", recurrence_parent: null, recurrence_child: "9" }, "UTC");
+  assert.deepEqual([r.recurrence_status, r.recurrence_trigger, r.recurrence_factor, r.recurrence_timeframe, r.recurrence_basedate, r.recurrence_parent, r.recurrence_child], [2, 1, 7, 0, 0, null, 9]);
   assert.deepEqual(tagNames({ "3": "repo:x", "1": "model:opus" }), ["model:opus", "repo:x"]);
   assert.deepEqual(tagNames(false), []);
 });

@@ -48,6 +48,10 @@ const num = (v: unknown): number | null => (typeof v === "number" ? v : typeof v
 const bool = (v: unknown): boolean => v === true || v === 1 || v === "1";
 const str = (v: unknown): string | null => (typeof v === "string" ? v : v === null || v === undefined ? null : String(v));
 
+/** The recurrence fields a task can be given (the tools' input) and the two Kanboard fills in. */
+export const RECURRENCE_WRITABLE = ["recurrence_status", "recurrence_trigger", "recurrence_factor", "recurrence_timeframe", "recurrence_basedate"] as const;
+const RECURRENCE_FIELDS = [...RECURRENCE_WRITABLE, "recurrence_parent", "recurrence_child"] as const;
+
 const TASK_DATES = ["date_creation", "date_modification", "date_moved", "date_started", "date_due", "date_completed"] as const;
 
 /** The task as the tools return it: ids and counts as numbers, dates as ISO text, `is_active` as a boolean, Kanboard's names kept. */
@@ -76,6 +80,10 @@ export function taskView(raw: Raw, zone: string): Raw {
     if (k in raw) out[k] = str(raw[k]);
   }
   for (const k of ["nb_comments", "nb_files", "nb_subtasks", "nb_completed_subtasks", "nb_links"]) {
+    if (k in raw) out[k] = num(raw[k]);
+  }
+  // Recurrence, as Kanboard stores it (README, "Recurring tasks"); parent and child are task ids, or null.
+  for (const k of RECURRENCE_FIELDS) {
     if (k in raw) out[k] = num(raw[k]);
   }
   return out;

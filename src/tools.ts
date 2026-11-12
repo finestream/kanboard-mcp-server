@@ -13,7 +13,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Credential } from "./credentials.ts";
 import { Kanboard, KanboardError, type KanboardAuth } from "./kanboard.ts";
-import { commentView, dateInput, fileView, isoAt, linkView, subtaskView, tagNames, taskView } from "./format.ts";
+import { RECURRENCE_WRITABLE, commentView, dateInput, fileView, isoAt, linkView, subtaskView, tagNames, taskView } from "./format.ts";
 import type { Log } from "./log.ts";
 
 /** The Kanboard user behind the agent, and Kanboard's time zone, as `getMe` and `getTimezone` tell them. */
@@ -85,6 +85,22 @@ const failure = (text: string): CallToolResult => ({ content: [{ type: "text", t
 const id = (what: string) => z.number().int().positive().describe(what);
 const text = (what: string, max = 100_000) => z.string().max(max).describe(what);
 const DATE_HELP = "YYYY-MM-DD or YYYY-MM-DD HH:MM, in Kanboard's time zone";
+
+/**
+ * A task's recurrence, with Kanboard's field names and numbers. Kanboard creates the next task
+ * when the trigger fires and then sets the status to 2 itself, so 2 is not accepted here.
+ */
+const RECURRENCE = {
+  recurrence_status: z.number().int().min(0).max(1).describe("Recurrence: 0 = off, 1 = on (Kanboard creates the next task when the trigger fires)"),
+  recurrence_trigger: z.number().int().min(0).max(2).describe("What creates the next task: 0 = moved out of the first column, 1 = moved to the last column, 2 = closed"),
+  recurrence_factor: z.number().int().min(1).max(10_000).describe("The interval, in units of recurrence_timeframe: the next task is due this long after the base date (7 with timeframe 0 = weekly)"),
+  recurrence_timeframe: z.number().int().min(0).max(2).describe("Unit of the interval: 0 = days, 1 = months, 2 = years"),
+  recurrence_basedate: z.number().int().min(0).max(1).describe("Base date of the next due date: 0 = this task's due date, 1 = the date the trigger fires"),
+};
+const RECURRENCE_SCHEMA = z.object(RECURRENCE).partial();
+const RECURRENCE_KEYS = RECURRENCE_WRITABLE;
+const OTHER_KEYS = RECURRENCE_KEYS.filter((k) => k !== "recurrence_status");
+type Recurrence = z.infer<typeof RECURRENCE_SCHEMA>;
 
 /** The largest search result returned; Kanboard has no paging on `searchTasks`. */
 const SEARCH_LIMIT = 200;
@@ -160,6 +176,20 @@ export function registerTools(server: McpServer, ctx: Context) {
     const d = dateInput(value);
     if (!d) throw new Refusal("input", `"${value}" is not a date for ${field}: use ${DATE_HELP} (for example 2026-11-20 or 2026-11-20 14:30).`);
     return d;
+  };
+
+  /**
+   * The rules a repeating task must meet, for create_task (nothing stored yet) and update_task (the
+   * stored task as `now`). Without them Kanboard accepts the settings and then repeats wrongly or not at all.
+   */
+  const checkRecurrence = (a: Recurrence, now: { subject: string; status: number; factor: number; child: number; due: boolean }) => {
+    const status = a.recurrence_status ?? now.status;
+    const others = OTHER_KEYS.filter((k) => a[k] !== undefined);
+    if (a.recurrence_status === 1 && now.child > 0) throw new Refusal("input", `${now.subject} already created its next task (recurrence_child ${now.child}); recurrence_status 1 would make Kanboard create a second one. Change the recurrence on task ${now.child} instead.`);
+    if (others.length && status !== 1) throw new Refusal("input", `${others.join(", ")} given without recurrence_status 1 (it is ${status}): ${now.subject.toLowerCase()} would not repeat. Add recurrence_status: 1${now.child > 0 ? "" : ", or leave the recurrence fields out"}.`);
+    if (status !== 1) return;
+    if ((a.recurrence_factor ?? now.factor) < 1) throw new Refusal("input", `recurrence_status 1 needs recurrence_factor of 1 or more (7 with recurrence_timeframe 0 = weekly): ${now.subject.toLowerCase()} has none, so every next task would have the same due date.`);
+    if (!now.due) throw new Refusal("input", `recurrence_status 1 needs a due date (date_due): ${now.subject.toLowerCase()} has none, and Kanboard computes the next due date from it.`);
   };
 
   /** The link labels: Kanboard's, or the built-in defaults when this user may not list them. */
@@ -322,7 +352,7 @@ export function registerTools(server: McpServer, ctx: Context) {
   server.registerTool(
     "get_task_details",
     {
-      description: "A task with its tags, internal links, subtasks and attachments (names only), and optionally its comments. Dates are ISO 8601 in Kanboard's time zone; `is_active` false means closed.",
+      description: "A task with its tags, internal links, subtasks and attachments (names only), and optionally its comments. Dates are ISO 8601 in Kanboard's time zone; `is_active` false means closed. The `recurrence_*` fields are those of create_task; status 2 means the next task exists, as `recurrence_child` (and that task names this one as `recurrence_parent`).",
       inputSchema: { task_id: id("Task id"), include_comments: z.boolean().optional().describe("Add the comments, oldest first (default false)") },
       annotations: read,
     },
@@ -370,7 +400,7 @@ export function registerTools(server: McpServer, ctx: Context) {
   server.registerTool(
     "create_task",
     {
-      description: "Create a task. `priority` is required because Kanboard gives 0 to a task created without one. Tags are names; missing ones are created in the project. Returns the new task's id and URL.",
+      description: "Create a task. `priority` is required because Kanboard gives 0 to a task created without one. Tags are names; missing ones are created in the project. A task that repeats gets recurrence_status 1 with a trigger, an interval and a due date (weekly: recurrence_factor 7, recurrence_timeframe 0). Returns the new task's id and URL.",
       inputSchema: {
         ...projectArg,
         title: text("Title", 1000).min(1),
@@ -384,13 +414,23 @@ export function registerTools(server: McpServer, ctx: Context) {
         date_due: z.string().max(40).describe(`Due date, ${DATE_HELP}`).optional(),
         tags: z.array(z.string().min(1).max(200)).max(50).describe("Tag names").optional(),
         reference: z.string().max(200).describe("External reference").optional(),
+        ...RECURRENCE_SCHEMA.shape,
       },
       annotations: write,
     },
-    tool<{ project_id: number; title: string; priority: number; description?: string; column_id?: number; swimlane_id?: number; category_id?: number; color_id?: string; owner_id?: number; date_due?: string; tags?: string[]; reference?: string }>("create_task", async (a) => {
+    tool<{ project_id: number; title: string; priority: number; description?: string; column_id?: number; swimlane_id?: number; category_id?: number; color_id?: string; owner_id?: number; date_due?: string; tags?: string[]; reference?: string } & Recurrence>("create_task", async (a) => {
+      const due = a.date_due === undefined ? undefined : dateOrRefuse("date_due", a.date_due);
+      checkRecurrence(a, { subject: "The new task", status: 0, factor: 0, child: 0, due: !!due });
+      if (a.recurrence_status === 1 && a.column_id !== undefined) {
+        const columns = await call<Raw[]>(`reading the columns of project ${a.project_id}`, "getColumns", { project_id: a.project_id });
+        const ordered = columns.map((c) => ({ id: Number(c.id), position: Number(c.position) })).sort((x, y) => x.position - y.position);
+        const trigger = a.recurrence_trigger ?? 0;
+        if (trigger === 0 && ordered[0] && a.column_id !== ordered[0].id) throw new Refusal("input", `recurrence_trigger 0 fires when the task moves out of the first column, and column ${a.column_id} is not the first. Create it in the first column (or leave column_id out), or use another trigger.`);
+        if (trigger === 1 && ordered.length > 1 && a.column_id === ordered.at(-1)!.id) throw new Refusal("input", `recurrence_trigger 1 fires when the task moves to the last column, and column ${a.column_id} is the last: it is already there. Use another column or trigger.`);
+      }
       const params: Raw = { project_id: a.project_id, title: a.title, priority: a.priority };
-      for (const k of ["description", "column_id", "swimlane_id", "category_id", "color_id", "owner_id", "tags", "reference"] as const) if (a[k] !== undefined) params[k] = a[k];
-      if (a.date_due !== undefined) params.date_due = dateOrRefuse("date_due", a.date_due);
+      for (const k of ["description", "column_id", "swimlane_id", "category_id", "color_id", "owner_id", "tags", "reference", ...RECURRENCE_KEYS] as const) if (a[k] !== undefined) params[k] = a[k];
+      if (due !== undefined) params.date_due = due;
       const task_id = await created(`creating the task "${a.title}"`, "createTask", params, "Check the project id, the column and swimlane ids (get_columns, get_swimlanes), the category and the owner (get_users).");
       const t = await task(task_id);
       return { task_id, url: t.url ?? null, title: a.title, project_id: a.project_id };
@@ -400,7 +440,7 @@ export function registerTools(server: McpServer, ctx: Context) {
   server.registerTool(
     "update_task",
     {
-      description: "Change a task's fields: title, description, category, colour, assignee, priority, reference, due or start date. Only the fields given change. To move a task use move_task; to change tags use set_task_tags.",
+      description: "Change a task's fields: title, description, category, colour, assignee, priority, reference, due or start date, recurrence. Only the fields given change. To move a task use move_task; to change tags use set_task_tags.",
       inputSchema: {
         task_id: id("Task id"),
         title: text("Title", 1000).min(1).optional(),
@@ -412,20 +452,26 @@ export function registerTools(server: McpServer, ctx: Context) {
         reference: z.string().max(200).describe("External reference").optional(),
         date_due: z.string().max(40).describe(`Due date, ${DATE_HELP}; an empty string clears it`).optional(),
         date_started: z.string().max(40).describe(`Start date, ${DATE_HELP}; an empty string clears it`).optional(),
+        ...RECURRENCE_SCHEMA.shape,
       },
       annotations: { ...write, idempotentHint: true },
     },
-    tool<{ task_id: number; title?: string; description?: string; category_id?: number; color_id?: string; owner_id?: number; priority?: number; reference?: string; date_due?: string; date_started?: string }>("update_task", async (a) => {
+    tool<{ task_id: number; title?: string; description?: string; category_id?: number; color_id?: string; owner_id?: number; priority?: number; reference?: string; date_due?: string; date_started?: string } & Recurrence>("update_task", async (a) => {
       const params: Raw = { id: a.task_id };
       const changed: string[] = [];
-      for (const k of ["title", "description", "category_id", "color_id", "owner_id", "priority", "reference"] as const) {
+      const dates: Raw = {};
+      for (const k of ["date_due", "date_started"] as const) if (a[k] !== undefined) dates[k] = dateOrRefuse(k, a[k]);
+      if (RECURRENCE_KEYS.some((k) => a[k] !== undefined) || a.date_due === "") {
+        const t = await task(a.task_id);
+        checkRecurrence(a, { subject: `Task ${a.task_id}`, status: Number(t.recurrence_status), factor: Number(t.recurrence_factor), child: Number(t.recurrence_child) || 0, due: a.date_due === undefined ? Number(t.date_due) > 0 : a.date_due !== "" });
+      }
+      for (const k of ["title", "description", "category_id", "color_id", "owner_id", "priority", "reference", ...RECURRENCE_KEYS] as const) {
         if (a[k] === undefined) continue;
         params[k] = a[k];
         changed.push(k);
       }
-      for (const k of ["date_due", "date_started"] as const) {
-        if (a[k] === undefined) continue;
-        params[k] = dateOrRefuse(k, a[k]);
+      for (const k of Object.keys(dates)) {
+        params[k] = dates[k];
         changed.push(k);
       }
       if (!changed.length) throw new Refusal("input", "Nothing to change: give at least one field besides task_id.");
@@ -464,6 +510,10 @@ export function registerTools(server: McpServer, ctx: Context) {
     { description: `Set a task's due date, with or without a time of day (${DATE_HELP}); an empty string clears it.`, inputSchema: { task_id: id("Task id"), due_date: z.string().max(40).describe(`${DATE_HELP}, or "" to clear`) }, annotations: { ...write, idempotentHint: true } },
     tool<{ task_id: number; due_date: string }>("set_task_due_date", async ({ task_id, due_date }) => {
       const d = dateOrRefuse("due_date", due_date);
+      if (d === "") {
+        const t = await task(task_id);
+        if (Number(t.recurrence_status) === 1) throw new Refusal("input", `Task ${task_id} repeats (recurrence_status 1) and Kanboard computes the next due date from this one: clearing it would leave every next task without a due date. Set recurrence_status 0 first.`);
+      }
       await apply(`setting the due date of task ${task_id}`, "updateTask", { id: task_id, date_due: d }, "Check that the task exists in a project the user is a member of.");
       const t = await task(task_id);
       return { task_id, date_due: isoAt(t.date_due, await zone()) };

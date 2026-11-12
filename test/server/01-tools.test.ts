@@ -165,6 +165,87 @@ test("tasks: update, move, assign, due date (set, with time, cleared, refused), 
   assert.equal(detail.column_id, wip.id);
 });
 
+test("recurrence: set on create and update, returned on read, and Kanboard creates the next task a week later", async () => {
+  const columns = ok(await alice.call("get_columns", { project_id: alpha })).columns;
+  const done = columns.at(-1);
+  const weekly = { recurrence_status: 1, recurrence_trigger: 1, recurrence_factor: 7, recurrence_timeframe: 0, recurrence_basedate: 0 };
+  const title = unique("Weekly");
+  const id = ok(await alice.call("create_task", { project_id: alpha, title, priority: 2, date_due: "2026-11-20 14:30", ...weekly })).task_id;
+  created.push(id);
+  const t = ok(await alice.call("get_task_details", { task_id: id }));
+  assert.deepEqual({ ...weekly, recurrence_parent: null, recurrence_child: null }, Object.fromEntries(Object.entries(t).filter(([k]) => k.startsWith("recurrence_"))));
+
+  ok(await alice.call("move_task", { task_id: id, column_id: done.id }));
+  const moved = ok(await alice.call("get_task_details", { task_id: id }));
+  assert.equal(typeof moved.recurrence_child, "number");
+  created.push(moved.recurrence_child);
+  assert.equal(moved.recurrence_status, 2, "Kanboard marks the task as processed");
+  const next = ok(await alice.call("get_task_details", { task_id: moved.recurrence_child }));
+  assert.equal(next.title, title);
+  assert.equal(next.date_due, "2026-11-27T14:30:00+00:00", "due one week after the first");
+  assert.equal(next.column_id, columns[0].id);
+  assert.equal(next.is_active, true);
+  assert.equal(next.recurrence_parent, id);
+  assert.deepEqual([next.recurrence_status, next.recurrence_trigger, next.recurrence_factor], [1, 1, 7], "the next task repeats too");
+  const hit = ok(await alice.call("search_tasks", { project_id: alpha, query: `id:${next.id}` })).tasks[0];
+  assert.equal(hit.recurrence_status, 1, "search results carry the recurrence");
+
+  // A plain task becomes a monthly one, and stops repeating again.
+  const plain = ok(await alice.call("create_task", { project_id: alpha, title: unique("Plain"), priority: 3 })).task_id;
+  created.push(plain);
+  assert.equal(ok(await alice.call("get_task_details", { task_id: plain })).recurrence_status, 0);
+  const upd = ok(await alice.call("update_task", { task_id: plain, date_due: "2026-11-20", recurrence_status: 1, recurrence_trigger: 2, recurrence_factor: 1, recurrence_timeframe: 1, recurrence_basedate: 1 }));
+  assert.deepEqual(upd.changed, ["recurrence_status", "recurrence_trigger", "recurrence_factor", "recurrence_timeframe", "recurrence_basedate", "date_due"]);
+  const monthly = ok(await alice.call("get_task_details", { task_id: plain }));
+  assert.deepEqual([monthly.recurrence_status, monthly.recurrence_trigger, monthly.recurrence_factor, monthly.recurrence_timeframe, monthly.recurrence_basedate], [1, 2, 1, 1, 1]);
+  ok(await alice.call("update_task", { task_id: plain, recurrence_status: 1, recurrence_trigger: 1 }));
+  ok(await alice.call("update_task", { task_id: plain, recurrence_status: 0 }));
+  assert.equal(ok(await alice.call("get_task_details", { task_id: plain })).recurrence_status, 0);
+  ok(await alice.call("move_task", { task_id: plain, column_id: done.id }));
+  const off = ok(await alice.call("get_task_details", { task_id: plain }));
+  assert.deepEqual([off.recurrence_status, off.recurrence_child], [0, null], "no next task once recurrence is off");
+
+  const refused = async (tool: string, args: Record<string, unknown>, re: RegExp) => {
+    const r = await alice.call(tool, args);
+    assert.equal(r.isError, true, JSON.stringify(args));
+    assert.match(r.text, re);
+  };
+  // 1: a repeating task needs a due date, on create and on update.
+  await refused("create_task", { project_id: alpha, title: "x", priority: 1, recurrence_status: 1, recurrence_trigger: 1, recurrence_factor: 7 }, /needs a due date/);
+  const undated = ok(await alice.call("create_task", { project_id: alpha, title: unique("Undated"), priority: 1 })).task_id;
+  created.push(undated);
+  await refused("update_task", { task_id: undated, recurrence_status: 1, recurrence_factor: 7 }, /needs a due date/);
+  ok(await alice.call("update_task", { task_id: undated, date_due: "2026-11-20", recurrence_status: 1, recurrence_factor: 7 }));
+  await refused("update_task", { task_id: undated, date_due: "" }, /needs a due date/);
+  // 2: a task that created its next task cannot be armed again.
+  await refused("update_task", { task_id: id, recurrence_status: 1 }, new RegExp(`recurrence_child ${moved.recurrence_child}`));
+  // 3: recurrence fields without status 1 do nothing, so they are refused.
+  await refused("create_task", { project_id: alpha, title: "x", priority: 1, date_due: "2026-11-20", recurrence_factor: 7 }, /without recurrence_status 1/);
+  await refused("update_task", { task_id: plain, recurrence_factor: 7 }, /without recurrence_status 1 \(it is 0\)/);
+  // 4: an interval of 0 would repeat the same due date.
+  await refused("update_task", { task_id: undated, recurrence_factor: 0 }, /recurrence_factor/);
+  // 5: status 1 needs a factor, given or stored.
+  await refused("create_task", { project_id: alpha, title: "x", priority: 1, date_due: "2026-11-20", recurrence_status: 1 }, /needs recurrence_factor/);
+  const noFactor = ok(await alice.call("create_task", { project_id: alpha, title: unique("NoFactor"), priority: 1, date_due: "2026-11-20" })).task_id;
+  created.push(noFactor);
+  await refused("update_task", { task_id: noFactor, recurrence_status: 1 }, /needs recurrence_factor/);
+  // 6: no way round the processed guard by switching off and on again.
+  ok(await alice.call("update_task", { task_id: id, recurrence_status: 0 }));
+  await refused("update_task", { task_id: id, recurrence_status: 1, recurrence_factor: 7 }, new RegExp(`recurrence_child ${moved.recurrence_child}`));
+  // 7: the due date of a repeating task cannot be cleared by set_task_due_date either.
+  await refused("set_task_due_date", { task_id: undated, due_date: "" }, /Set recurrence_status 0 first/);
+  assert.equal(ok(await alice.call("set_task_due_date", { task_id: undated, due_date: "2026-11-27" })).date_due?.slice(0, 10), "2026-11-27");
+  // 8: a trigger that cannot fire from the column the task is created in.
+  await refused("create_task", { project_id: alpha, title: "x", priority: 1, date_due: "2026-11-20", column_id: done.id, recurrence_status: 1, recurrence_trigger: 1, recurrence_factor: 7 }, /is the last/);
+  await refused("create_task", { project_id: alpha, title: "x", priority: 1, date_due: "2026-11-20", column_id: done.id, recurrence_status: 1, recurrence_trigger: 0, recurrence_factor: 7 }, /not the first/);
+
+  for (const bad of [{ recurrence_status: 2 }, { recurrence_trigger: 3 }, { recurrence_timeframe: -1 }, { recurrence_factor: 1.5 }]) {
+    const r = await alice.call("update_task", { task_id: plain, ...bad });
+    assert.equal(r.isError, true, JSON.stringify(bad));
+    assert.match(r.text, new RegExp(Object.keys(bad)[0]!));
+  }
+});
+
 test("comments: added as the connected user, updated by its author only, listed oldest first", async () => {
   const id = ok(await alice.call("create_task", { project_id: alpha, title: unique("Commented"), priority: 3 })).task_id;
   created.push(id);
