@@ -1,7 +1,7 @@
 // Runs the server against the compose test instance for the integration tests:
 // writes a credentials file into a temporary directory, spawns `node
 // src/main.ts`, waits for its "listening" line, and gives the tests an MCP
-// client per bearer. Taken from finestream/silverbullet-mcp (MIT).
+// client per bearer. Taken from finestream/silverbullet-mcp-server (MIT).
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";

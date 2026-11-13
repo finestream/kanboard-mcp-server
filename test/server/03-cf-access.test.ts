@@ -1,7 +1,7 @@
 // Cloudflare Access in front of the server (docs/cloudflare-access.md) against
 // the compose test instance and a test team domain: a local HTTP server that
 // publishes signing keys where a team domain does and signs assertions the way
-// Access does. Adapted from finestream/silverbullet-mcp (MIT).
+// Access does. Adapted from finestream/silverbullet-mcp-server (MIT).
 
 import test, { before, after } from "node:test";
 import assert from "node:assert/strict";

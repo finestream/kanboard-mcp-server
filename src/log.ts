@@ -1,6 +1,6 @@
 // Structured log: one JSON object per line on stdout. A request line holds
 // time, user, tool and outcome; never contents, never tokens.
-// Taken from finestream/silverbullet-mcp (MIT).
+// Taken from finestream/silverbullet-mcp-server (MIT).
 
 export type Level = "debug" | "info" | "warn" | "error";
 

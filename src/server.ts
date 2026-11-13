@@ -4,7 +4,7 @@
 // an OAuth access token, or by the assertion Cloudflare Access adds to a
 // request it let through (docs/security.md, section 3), then served by its own
 // McpServer whose tools are bound to that agent's Kanboard user.
-// Taken from finestream/silverbullet-mcp (MIT).
+// Taken from finestream/silverbullet-mcp-server (MIT).
 
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
