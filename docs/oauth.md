@@ -1,6 +1,6 @@
 # OAuth
 
-Status: **built and tested against a test issuer** (2026-11-09); the verifier is the one of [finestream/silverbullet-mcp](https://github.com/finestream/silverbullet-mcp/blob/main/docs/oauth.md), where it has run against Keycloak since 2026-11-07.
+Status: **built and tested against a test issuer** (2026-11-09); the verifier is the one of [finestream/silverbullet-mcp-server](https://github.com/finestream/silverbullet-mcp-server/blob/main/docs/oauth.md), where it has run against Keycloak since 2026-11-07.
 
 The server can verify OAuth 2.1 access tokens beside the static bearers. It is a **resource server only**: an external authorization server (an OpenID Connect provider such as Keycloak) logs the user in and issues the token, the server checks it and looks the agent up in its credentials file. It runs no authorization server, stores no token and forwards none.
 

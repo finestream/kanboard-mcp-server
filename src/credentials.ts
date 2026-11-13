@@ -2,7 +2,7 @@
 // the Kanboard user the agent acts as, that user's API token, the SHA-256
 // hashes of the agent's static bearers and, optionally, the e-mail addresses
 // Cloudflare Access signs the agent in with. The token never leaves the server.
-// Taken from finestream/silverbullet-mcp (MIT), without the space and group fields.
+// Taken from finestream/silverbullet-mcp-server (MIT), without the space and group fields.
 
 import { createHash, timingSafeEqual } from "node:crypto";
 

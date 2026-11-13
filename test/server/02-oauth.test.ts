@@ -1,7 +1,7 @@
 // OAuth 2.1 resource server (docs/oauth.md) against the compose test instance
 // and a test issuer: a local HTTP server that publishes OpenID Connect discovery
 // and a JWKS, and signs tokens the way an identity provider does.
-// Adapted from finestream/silverbullet-mcp (MIT).
+// Adapted from finestream/silverbullet-mcp-server (MIT).
 
 import test, { before, after } from "node:test";
 import assert from "node:assert/strict";

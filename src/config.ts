@@ -1,7 +1,7 @@
 // Configuration from the environment (README, "Configuration"): where Kanboard
 // is, the credentials file, the rate limit, the log level, and the two optional
 // logins beside static bearers. Secrets are files; nothing secret is read from a
-// variable. `WatchedFile` is taken from finestream/silverbullet-mcp (MIT).
+// variable. `WatchedFile` is taken from finestream/silverbullet-mcp-server (MIT).
 
 import { readFileSync, statSync, watchFile, unwatchFile } from "node:fs";
 import { loadOAuthConfig, type OAuthConfig } from "./oauth.ts";
